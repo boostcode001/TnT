@@ -1,0 +1,77 @@
+services:
+  fastapi-app:
+    build: ./backend
+    container_name: fastapi-backend
+    # 외부 포트 노출 제거 — nginx를 통해서만 접근
+    expose:
+      - "8000"
+    volumes:
+      - ./backend/models:/app/models
+      - ./backend/logs:/app/logs
+    env_file: .env
+    networks:
+      - my-app-network
+    depends_on:
+      - mongodb
+      - redis
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb-server
+    ports:
+      - "27017:27017"
+    networks:
+      - my-app-network
+    volumes:
+      - ./db/data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-server
+    ports:
+      - "6379:6379"
+    networks:
+      - my-app-network
+
+  celery-worker:
+    build: ./backend
+    container_name: celery-worker
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    volumes:
+      - ./backend/models:/app/models
+      - ./backend/logs:/app/logs
+    env_file: .env
+    networks:
+      - my-app-network
+    depends_on:
+      - mongodb
+      - redis
+
+  frontend-builder:
+    build: ./frontend
+    container_name: frontend-builder
+    volumes:
+      # /app/dist(이미지 내 빌드 결과)를 /output(볼륨)으로 복사 후 종료
+      - frontend-dist:/output
+    command: ["sh", "-c", "cp -r /app/dist/. /output/ && echo 'Frontend build copied'"]
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-server
+    ports:
+      - "80:80"
+    volumes:
+      - frontend-dist:/usr/share/nginx/html:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - my-app-network
+    depends_on:
+      - fastapi-app
+      - frontend-builder
+
+volumes:
+  frontend-dist:
+
+networks:
+  my-app-network:
+    driver: bridge
